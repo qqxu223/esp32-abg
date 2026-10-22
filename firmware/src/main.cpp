@@ -94,6 +94,7 @@ static bool saveDeviceId(const String&, const String&, const String&);
 static String htmlEscape(const String&);
 static Dev* getClient(uint32_t);
 static void probeUpstream();
+static void handleAdmin();
 
 // ---------------- 编译期自检 ----------------
 static_assert(sizeof(Dev) <= 64, "Dev 结构过大，检查 MAX_CLIENTS 内存占用");
@@ -616,6 +617,52 @@ static void startConfigPortal() {
   }
 }
 
+// ---------------- 管理页 ----------------
+static void handleAdmin() {
+  static const char PAGE[] =
+      "<!doctype html><meta charset=utf-8>"
+      "<meta name=viewport content='width=device-width,initial-scale=1'>"
+      "<title>AdBlock Admin</title>"
+      "<body style='font:15px/1.6 system-ui;max-width:660px;margin:24px auto;padding:0 16px'>"
+      "<h2>AdBlock 管理台 " FW_VERSION "</h2>"
+      "<p>首次点击任意按钮会弹出登录框（用户 admin）。诊断数据见 <a href=/>首页</a>。</p>"
+      "<h3>拦截开关</h3>"
+      "<button onclick=doIt('/pause')>暂停拦截</button> "
+      "<button onclick=doIt('/resume')>恢复拦截</button> <span id=st></span>"
+      "<h3>白名单</h3>"
+      "<p><input id=d placeholder='example.com' size=28> "
+      "<button onclick=addD()>加入白名单</button></p>"
+      "<ul id=al style='padding-left:18px'></ul>"
+      "<h3>上传</h3>"
+      "<p>规则包 blocklist.bin：<input type=file id=rf><button onclick=upl('/upload','rf')>上传</button></p>"
+      "<p>固件 firmware.bin：<input type=file id=fw><button onclick=upl('/update','fw')>上传</button>（上传后设备自动重启）</p>"
+      "<pre id=o style='background:#f6f8fa;padding:12px;border-radius:8px;white-space:pre-wrap'></pre>"
+      "<script>"
+      "function H(r){return {'X-Requested-With':'adblock'}}"
+      "function show(t){document.getElementById('o').textContent=t}"
+      "async function refresh(){"
+      " try{var s=await (await fetch('/stats.json')).json();"
+      " document.getElementById('st').textContent='当前: '+(s.blocking?'拦截中':'已暂停')+'  拦截率 '+s.rate+'%';"
+      " var ul=document.getElementById('al');ul.innerHTML='';"
+      " s.allow.forEach(function(d){var li=document.createElement('li');"
+      " li.innerHTML=d+' <button onclick=rmD(\\''+d+'\\')>移除</button>';ul.appendChild(li);});"
+      " }catch(e){}}"
+      "async function doIt(u){var r=await fetch(u,{headers:H()});show(u+' -> '+r.status);refresh();}"
+      "async function addD(){var d=document.getElementById('d').value.trim();if(!d)return;"
+      " var r=await fetch('/allow?d='+encodeURIComponent(d),{headers:H()});show('add '+d+' -> '+r.status);refresh();}"
+      "async function rmD(d){var r=await fetch('/allow-remove?d='+encodeURIComponent(d),{headers:H()});show('rm '+d+' -> '+r.status);refresh();}"
+      "async function upl(u,id){var f=document.getElementById(id).files[0];if(!f){show('先选文件');return;}"
+      " var ping=await fetch('/auth-ping',{headers:H()});"   // 先触发浏览器登录框
+      " if(!ping.ok){show('登录失败');return;}"
+      " show('上传中 '+f.name+' ('+(f.size/1048576).toFixed(1)+'MB) ...');"
+      " var fd=new FormData();fd.append('file',f,f.name);"
+      " try{var r=await fetch(u,{method:'POST',headers:H(),body:fd});show(u+' -> '+r.status+' '+await r.text());}"
+      " catch(e){show('失败: '+e)}}"
+      "refresh();setInterval(refresh,8000);"
+      "</script></body>";
+  web.send_P(200, "text/html", PAGE);
+}
+
 // ---------------- setup / loop ----------------
 void setup() {
   Serial.begin(115200);
@@ -697,6 +744,28 @@ void setup() {
       web.send(400, "text/plain", "bad domain");
     }
   });
+  web.on("/allow-remove", HTTP_GET, []() {
+    if (!requireAuth()) return;
+    String d = web.arg("d");
+    d.trim();
+    d.toLowerCase();
+    for (int i = 0; i < numCustomAllow; i++) {
+      if (customAllow[i].equalsIgnoreCase(d)) {
+        for (int j = i; j < numCustomAllow - 1; j++) customAllow[j] = customAllow[j + 1];
+        numCustomAllow--;
+        saveCustomAllow();
+        web.send(200, "text/plain", "removed " + d);
+        return;
+      }
+    }
+    web.send(404, "text/plain", "not in allowlist");
+  });
+  // 供前端"先触发一次登录"用的探测端点
+  web.on("/auth-ping", HTTP_GET, []() {
+    if (!requireAuth()) return;
+    web.send(200, "text/plain", "ok");
+  });
+  web.on("/admin", HTTP_GET, handleAdmin);
   web.on("/pause", HTTP_GET, []() {
     if (!requireAuth()) return;
     blockingOn = false;
