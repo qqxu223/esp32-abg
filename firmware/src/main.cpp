@@ -17,11 +17,6 @@ extern "C" {
 #include <lwip/etharp.h>
 #include <lwip/netif.h>
 }
-// core 3.x 才有 esp_netif（core 2.x 直接用 netif_default）
-#if __has_include(<esp_netif.h>)
-#include <esp_netif.h>
-#define ADB_HAVE_ESP_NETIF 1
-#endif
 #include "adblock.h"
 #include "secrets.h"
 
@@ -316,20 +311,13 @@ static void getMac(uint32_t ip, uint8_t* mac) {
   ip4_addr_t ipa;
   ipa.addr = ip;
 
-  struct netif* target = nullptr;
-#if defined(ADB_HAVE_ESP_NETIF)
-  // core 3.x：WiFi 的 netif 要通过 esp_netif 拿（io_desc 就是底层 netif）
-  esp_netif_t* nif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-  if (nif) target = (struct netif*)esp_netif_get_io_desc(nif);
-#else
-  target = netif_default;
-#endif
-  if (!target) return;
-
   struct eth_addr* eth = nullptr;
   const ip4_addr_t* ipret = nullptr;
-  if (etharp_find_addr(target, &ipa, &eth, &ipret) >= 0 && eth) {
-    memcpy(mac, eth->addr, 6);
+  for (struct netif* nif = netif_list; nif; nif = nif->next) {
+    if (etharp_find_addr(nif, &ipa, &eth, &ipret) >= 0 && eth) {
+      memcpy(mac, eth->addr, 6);
+      return;
+    }
   }
 }
 
