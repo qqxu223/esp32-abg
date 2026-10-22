@@ -118,7 +118,7 @@ jobs:
             0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
 
           # 生成预装规则包的 LittleFS 镜像（烧到 0x810000，免得用户再手动上传规则）
-          python -m pip install --quiet "littlefs-python>=2.0"
+          python -m pip install --quiet littlefs-python
           python - <<'PY'
           from littlefs import LittleFS
           # littlefs 分区 6MB = 1536 块 x 4KB；必须先 format + mount 再写
