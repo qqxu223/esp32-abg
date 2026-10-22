@@ -108,13 +108,27 @@ jobs:
           cp firmware/data/blocklist.bin out/blocklist.bin
 
           # 合并成一次烧录的整包
+          # 注意用 dio/40m：qio/80m 在部分 S3 板上会让二级 bootloader 直接崩
           # ESP32-S3 flash 布局：bootloader 0x0 / 分区表 0x8000 / app 0x10000
           python -m pip install --quiet "esptool>=4.7"
           cd out
           python -m esptool --chip esp32s3 merge_bin \
             -o firmware-merged.bin \
-            --flash_mode qio --flash_freq 80m --flash_size 16MB \
+            --flash_mode dio --flash_freq 40m --flash_size 16MB \
             0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+
+          # 生成预装规则包的 LittleFS 镜像（烧到 0x810000，免得用户再手动上传规则）
+          python -m pip install --quiet littlefs-python
+          python - <<'PY'
+          from littlefs import LittleFS
+          # littlefs 分区 6MB = 1536 块 x 4KB
+          fs = LittleFS(block_size=4096, block_count=1536, mount=False)
+          with fs.open('/blocklist.bin', 'wb') as f:
+              f.write(open('blocklist.bin', 'rb').read())
+          img = bytes(fs.context.buffer)
+          open('littlefs.img', 'wb').write(img)
+          print('littlefs.img', len(img))
+          PY
           ls -lh
 
       - name: 上传 artifact
