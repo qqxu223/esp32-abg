@@ -1,0 +1,10 @@
+# 源码统一 LF，避免 Windows 检出时 CRLF 混进编译产物
+* text=auto eol=lf
+
+*.bin binary
+*.png binary
+*.jpg binary
+
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
