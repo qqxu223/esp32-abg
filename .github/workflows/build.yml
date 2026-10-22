@@ -1,0 +1,132 @@
+name: build
+
+# 云端编译 ESP32-S3 固件。
+# 为什么放 CI：本地下载 xtensa 工具链长期失败（GitHub Releases 被限速），
+# CI runner 直连没问题，且能让"改一行 → 拿固件"变成一次网页操作。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+      - 'rules/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '固件版本号（留空则自动用 2.0.<build号>）'
+        required: false
+        default: ''
+      web_pass:
+        description: '设备后台口令（secret，日志自动打码）'
+        type: string
+        required: false
+      ota_pass:
+        description: 'OTA 升级口令（secret）'
+        type: string
+        required: false
+
+env:
+  # 只透传手动触发时填的版本；push 触发时为空，由下面的 step 自动生成
+  FW_INPUT: ${{ github.event.inputs.version }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 确定版本号
+        id: ver
+        env:
+          V_IN: ${{ env.FW_INPUT }}
+        run: |
+          V="${V_IN:-}"
+          if [ -z "$V" ] || [ "$V" = "null" ]; then
+            V="2.0.${{ github.run_number }}"
+          fi
+          echo "value=$V" >> "$GITHUB_OUTPUT"
+          echo "固件版本：$V"
+
+      - name: 缓存 PlatformIO 工具链
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: 安装 PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: 生成 secrets.h
+        working-directory: firmware
+        env:
+          S_WEB_USER: ${{ secrets.WEB_USER || 'admin' }}
+          S_WEB_PASS: ${{ secrets.WEB_PASS || github.event.inputs.web_pass }}
+          S_OTA_PASS: ${{ secrets.OTA_PASS || github.event.inputs.ota_pass }}
+        run: python ../scripts/gen_secrets.py
+
+      - name: 校验规则包与引擎
+        run: |
+          python rules/test_engine.py
+          python rules/verify_pack.py firmware/data/blocklist.bin
+          python rules/sim_dns.py firmware/data/blocklist.bin --mode full | tail -6
+          # 拦截率必须 100%，掉下来说明规则源结构变了
+          python rules/sim_dns.py firmware/data/blocklist.bin --mode full | grep -q '有效拦截: 20/20'
+
+      - name: 写入版本号
+        working-directory: firmware
+        run: |
+          printf '#pragma once\n#define FW_VERSION "%s"\n' "${{ steps.ver.outputs.value }}" > src/version.h
+          cat src/version.h
+
+      - name: 编译固件
+        working-directory: firmware
+        run: pio run -e s3
+
+      - name: 收集产物
+        run: |
+          set -e
+          mkdir -p out
+          B=firmware/.pio/build/s3
+          for f in firmware.bin bootloader.bin partitions.bin; do
+            cp "$B/$f" "out/$f"
+          done
+          if [ -f "$B/firmware.elf" ]; then cp "$B/firmware.elf" out/; fi
+          cp firmware/data/blocklist.bin out/blocklist.bin
+
+          # 合并成一次烧录的整包
+          # ESP32-S3 flash 布局：bootloader 0x0 / 分区表 0x8000 / app 0x10000
+          python -m pip install --quiet "esptool>=4.7"
+          cd out
+          python -m esptool --chip esp32s3 merge_bin \
+            -o firmware-merged.bin \
+            --flash_mode qio --flash_freq 80m --flash_size 16MB \
+            0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+          ls -lh
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-adblock-${{ steps.ver.outputs.value }}
+          path: out/*
+          retention-days: 90
+
+      - name: 打 tag 时同步发 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
