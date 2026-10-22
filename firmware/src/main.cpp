@@ -625,7 +625,8 @@ void setup() {
   Serial.printf("chip=%s flash=%uMB psram=%uKB\n", ESP.getChipModel(),
                 (unsigned)(ESP.getFlashChipSize() / 1048576), (unsigned)(ESP.getPsramSize() / 1024));
 
-  if (!LittleFS.begin(true)) Serial.println("[fs] LittleFS mount failed");
+  // 分区表里文件系统标签是 "littlefs"（不是默认的 "spiffs"），必须显式指定
+  if (!LittleFS.begin(true, "/littlefs", 10, "littlefs")) Serial.println("[fs] LittleFS mount failed");
 
   loadCustomAllow();
   loadDeviceId();
