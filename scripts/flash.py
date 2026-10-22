@@ -91,9 +91,11 @@ def main():
             print(f"文件不存在：{target}")
             sys.exit(1)
         print(f"== 烧录整包 {target} ==")
+        # 不带 --flash_mode/--flash_freq：保留镜像里 bootloader 头的时序设置
+        # （qio/80m 在部分 S3 板上会让 bootloader 崩，CI 合包时已用 dio/40m）
         run(base + [
             "--before", "default_reset", "--after", "hard_reset",
-            "write_flash", "--flash_mode", "qio", "--flash_freq", "80m", "--flash_size", "16MB",
+            "write_flash", "--flash_size", "16MB",
             "0x0", target,
         ])
     else:
@@ -102,9 +104,17 @@ def main():
             print(f"== 烧录整包 {merged} ==")
             run(base + [
                 "--before", "default_reset", "--after", "hard_reset",
-                "write_flash", "--flash_mode", "qio", "--flash_freq", "80m", "--flash_size", "16MB",
+                "write_flash", "--flash_size", "16MB",
                 "0x0", merged,
             ])
+            # 预装规则包的文件系统镜像（可选，不存在就跳过）
+            lfs = locate("littlefs.img")
+            if lfs:
+                print(f"== 写入规则包镜像 {lfs} -> 0x810000 ==")
+                run(base + [
+                    "--before", "default_reset", "--after", "hard_reset",
+                    "write_flash", "0x810000", lfs,
+                ])
         else:
             parts = [(n, a, locate(n)) for n, a in LAYOUT]
             missing = [n for n, _, p in parts if not p]
@@ -114,7 +124,7 @@ def main():
                 sys.exit(1)
             print("== 分片烧录 ==")
             cmd = base + ["--before", "default_reset", "--after", "hard_reset",
-                          "write_flash", "--flash_mode", "qio", "--flash_freq", "80m", "--flash_size", "16MB"]
+                          "write_flash", "--flash_size", "16MB"]
             for name, addr, path in parts:
                 cmd += [hex(addr), path]
             run(cmd)
