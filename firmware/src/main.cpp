@@ -318,9 +318,9 @@ static void getMac(uint32_t ip, uint8_t* mac) {
 
   struct netif* target = nullptr;
 #if defined(ADB_HAVE_ESP_NETIF)
-  // core 3.x：WiFi 的 netif 要通过 esp_netif 拿
+  // core 3.x：WiFi 的 netif 要通过 esp_netif 拿（io_desc 就是底层 netif）
   esp_netif_t* nif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-  if (nif) target = (struct netif*)esp_netif_get_netif_impl(nif);
+  if (nif) target = (struct netif*)esp_netif_get_io_desc(nif);
 #else
   target = netif_default;
 #endif
