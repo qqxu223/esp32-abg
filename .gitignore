@@ -1,0 +1,27 @@
+# 私密配置：真实口令绝不进仓库（CI 从一个 GitHub Secrets 生成）
+firmware/src/secrets.h
+firmware/src/version.h
+
+# PlatformIO 构建产物
+firmware/.pio/
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# 规则源缓存（几 MB 的 txt，可以随时重新下载）
+rules/.cache/
+rules/*.txt
+
+# 本地临时文件
+*.log
+*.tmp
+downloads/
+dist/
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
